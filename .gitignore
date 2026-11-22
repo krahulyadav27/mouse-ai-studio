@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.tsbuildinfo
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Signing certificates and private keys
+*.pem
+*.pfx
+*.p12
+*.key

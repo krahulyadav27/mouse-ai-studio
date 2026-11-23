@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Activity, AudioWaveform, Check, ChevronDown, CircleHelp, ClipboardList, Crosshair, Download, Gamepad2, Gauge, Mouse, MousePointer2, MousePointerClick, Radio, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
@@ -18,7 +18,16 @@ function saveDownload(fileName: string, body: string, type: string) { const url=
 export default function App(){
   const [page,setPage]=useState("Overview"),[devices,setDevices]=useState<Device[]>([]),[activeDeviceId,setActiveDeviceId]=useState(""),[loading,setLoading]=useState(true),[error,setError]=useState(""),[dpi,setDpi]=useState(800),[pollingActive,setPollingActive]=useState(false),[timestamps,setTimestamps]=useState<number[]>([]),[distance,setDistance]=useState(10),[pixels,setPixels]=useState(0),[sensorActive,setSensorActive]=useState(false),[motion,setMotion]=useState({count:0,x:0,y:0}),[buttonEvents,setButtonEvents]=useState<ButtonRecord[]>([]),[doubleActive,setDoubleActive]=useState(false),[scrollEvents,setScrollEvents]=useState<ScrollRecord[]>([]),[profiles,setProfiles]=useState<Profile[]>(profilesFromStorage),[profileName,setProfileName]=useState("Custom"),[notice,setNotice]=useState("");
   const desktop=isTauri();
+  const [hidReport, setHidReport] = useState<number[] | null>(null);
   async function refresh(){setLoading(true);setError("");try{if(desktop)setDevices(await invoke<Device[]>("list_pointing_devices"));else{setDevices([]);setError("Hardware discovery is available in the Windows desktop build. This preview does not report connected devices.");}}catch(e){setDevices([]);setError(`Device scan failed: ${String(e)}`);}finally{setLoading(false)}}
+  async function readHidReport() {
+  try {
+    const report = await invoke<number[]>("capture_hs6209_report");
+    setHidReport(report);
+  } catch (error) {
+    setError(String(error));
+  }
+}
   const selected=devices.find(d=>d.id===activeDeviceId)??devices[0];
   useEffect(()=>{void refresh()},[]);
   useEffect(()=>{setActiveDeviceId(current=>devices.some(d=>d.id===current)?current:(devices[0]?.id??""))},[devices]);
@@ -29,10 +38,10 @@ export default function App(){
   useEffect(()=>{if(!desktop)return;void invoke("set_setting",{key:"configuredDpi",value:String(dpi)}).catch(e=>setNotice(`DPI profile setting could not be saved: ${String(e)}`))},[desktop,dpi]);
   useEffect(()=>{if(!desktop||!selected)return;void invoke("set_setting",{key:"activeDeviceId",value:selected.id}).catch(()=>{})},[desktop,selected?.id]);
   useEffect(()=>{if(!pollingActive||page!=="Polling rate")return;const onMove=(event:PointerEvent)=>setTimestamps(v=>[...v,event.timeStamp].slice(-240));window.addEventListener("pointermove",onMove,{passive:true});return()=>window.removeEventListener("pointermove",onMove)},[pollingActive,page]);
-  useEffect(()=>{if(!sensorActive||page!=="Sensor lab")return;let prior:{x:number;y:number}|undefined;const onMove=(event:PointerEvent)=>{if(prior){setMotion(m=>({...m,count:m.count+1,x:m.x+Math.abs(event.clientX-prior!.x),y:m.y+Math.abs(event.clientY-prior!.y)}));}prior={x:event.clientX,y:event.clientY}};window.addEventListener("pointermove",onMove,{passive:true});return()=>window.removeEventListener("pointermove",onMove)},[sensorActive,page]);
+  useEffect(()=>{if(!sensorActive||page!=="Sensor lab")return;const onMove=(event:PointerEvent)=>{setMotion(m=>({...m,count:m.count+1,x:m.x+Math.abs(event.movementX),y:m.y+Math.abs(event.movementY)}));};window.addEventListener("pointermove",onMove,{passive:true});return()=>window.removeEventListener("pointermove",onMove);},[sensorActive,page]);
   const intervals=useMemo(()=>timestamps.slice(1).map((t,i)=>t-timestamps[i]).filter(n=>n>0),[timestamps]);
   const rate=intervals.length?Math.round(1000/(intervals.reduce((a,b)=>a+b,0)/intervals.length)):0;
-  const dpiEstimate=pixels/(distance/25.4);
+  const dpiEstimate=pixels/(distance/25.4); 
   const chartData=intervals.slice(-60).map((v,i)=>({i,rate:Math.round(1000/v)}));
   function recordButton(event:ReactPointerEvent<HTMLDivElement>){setButtonEvents(v=>[{button:event.button,time:event.timeStamp},...v].slice(0,60));}
   function recordDoubleClick(event:ReactPointerEvent<HTMLDivElement>){if(doubleActive&&event.button===0)recordButton(event)}
@@ -46,14 +55,14 @@ export default function App(){
   {error&&<div className="notice"><ShieldCheck size={17}/><span>{error}</span></div>}{notice&&<div className="notice success-notice"><Check size={17}/><span>{notice}</span><button onClick={()=>setNotice("")} aria-label="Dismiss">×</button></div>}
   {page==="Overview"&&<Overview devices={devices} loading={loading} selected={selected} dpi={dpi} setDpi={setDpi} dpiEstimate={dpiEstimate} distance={distance} setDistance={setDistance} pixels={pixels} setPixels={setPixels} rate={rate} intervals={intervals} chartData={chartData} onNavigate={setPage}/>}
   {page==="My devices"&&<Devices devices={devices} loading={loading} selectedId={selected?.id??""} onSelect={setActiveDeviceId} onRefresh={()=>void refresh()}/>}
-  {page==="DPI control"&&<DpiControl dpi={dpi} setDpi={setDpi} dpiEstimate={dpiEstimate} distance={distance} setDistance={setDistance} pixels={pixels} setPixels={setPixels} selected={selected}/>}
+  {page==="DPI control"&&<DpiControl dpi={dpi} setDpi={setDpi} dpiEstimate={dpiEstimate} distance={distance} setDistance={setDistance} pixels={pixels} setPixels={setPixels} selected={selected} hidReport={hidReport} onReadHidReport={readHidReport}/>}
   {page==="Polling rate"&&<Polling active={pollingActive} setActive={setPollingActive} timestamps={timestamps} intervals={intervals} rate={rate} chartData={chartData}/>}
   {page==="Sensor lab"&&<Sensor active={sensorActive} setActive={setSensorActive} motion={motion} setMotion={setMotion}/>}
   {page==="Button tester"&&<ButtonTester events={buttonEvents} onPointerDown={recordButton}/>}
   {page==="Double-click test"&&<DoubleClickTester active={doubleActive} events={buttonEvents} onToggle={()=>{if(doubleActive)setDoubleActive(false);else{setButtonEvents([]);setDoubleActive(true)}}} onPointerDown={recordDoubleClick}/>}
   {page==="Scroll test"&&<ScrollTester events={scrollEvents} onWheel={recordScroll}/>}
   {page==="Performance lab"&&<Performance selected={selected} intervals={intervals} rate={rate} motion={motion} buttonCount={buttonEvents.length} scrollCount={scrollEvents.length}/>}
-  {page==="AI assistant"&&<Assistant selected={selected} dpiEstimate={dpiEstimate} rate={rate}/>}
+  {page==="AI assistant"&&<Assistant selected={selected} dpiEstimate={dpiEstimate} rate={rate} desktop={desktop}/>}
   {page==="Profiles"&&<Profiles dpi={dpi} setDpi={setDpi} profileName={profileName} setProfileName={setProfileName} profiles={profiles} onSave={saveProfile} desktop={desktop}/>}
   {page==="Reports"&&<Reports onExport={exportReport} device={selected?.name??"Not available"}/>}
   {page==="Settings"&&<SettingsPage desktop={desktop}/>}
@@ -72,19 +81,255 @@ function Metric({label,value,unit,note,foot}:{label:string;value:string;unit:str
 function RateChart({data}:{data:{i:number;rate:number}[]}){return <ResponsiveContainer width="100%" height="100%"><AreaChart data={data}><defs><linearGradient id="event-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#50a8ff" stopOpacity={.26}/><stop offset="100%" stopColor="#50a8ff" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#202638" vertical={false}/><XAxis dataKey="i" hide/><YAxis domain={[0,"auto"]} tick={{fill:"#758096",fontSize:10}} axisLine={false} tickLine={false} width={35}/><Tooltip contentStyle={{background:"#111722",border:"1px solid #283145",borderRadius:8}}/><Area type="monotone" dataKey="rate" name="Observed events/s" stroke="#56a8ff" fill="url(#event-fill)" strokeWidth={2} isAnimationActive={false}/></AreaChart></ResponsiveContainer>}
 function Empty({icon,title,detail}:{icon:ReactNode;title:string;detail:string}){return <div className="empty-chart"><div className="chart-icon">{icon}</div><b>{title}</b><span>{detail}</span></div>}
 function QuickLink({icon,title,detail,onClick}:{icon:ReactNode;title:string;detail:string;onClick:()=>void}){return <button className="quick-row" onClick={onClick}><div className="quick-icon bluebg">{icon}</div><span><b>{title}</b><small>{detail}</small></span><span className="row-arrow">↗</span></button>}
-function Calibration({dpiEstimate,distance,setDistance,pixels,setPixels}:{dpiEstimate:number;distance:number;setDistance:(v:number)=>void;pixels:number;setPixels:(v:number)=>void}){return <Card className="tool-card"><div className="card-head"><div><span className="label">DPI CALIBRATION</span><h3>Manual movement estimate</h3></div><Crosshair size={16}/></div><p className="tool-desc">Enter physical movement and the corresponding on-screen pointer travel. This is an estimate, not a hardware reading.</p><div className="form-row"><label>Distance <input type="number" min="1" value={distance} onChange={e=>setDistance(Math.max(1,+e.target.value||1))}/><em>mm</em></label><label>Pointer travel <input type="number" min="0" value={pixels} onChange={e=>setPixels(Math.max(0,+e.target.value||0))}/><em>px</em></label></div><div className="estimate"><span>ESTIMATED EFFECTIVE DPI</span><b>{dpiEstimate?Math.round(dpiEstimate).toLocaleString():"—"}</b><small>OS scaling and pointer acceleration affect this estimate.</small></div></Card>}
+function Calibration({dpiEstimate,distance,setDistance,pixels,setPixels}:{dpiEstimate:number;distance:number;setDistance:(v:number)=>void;pixels:number;setPixels:(v:number)=>void}) {
+  const [active, setActive] = useState(false);
+  const previous = useRef<{x:number;y:number}|null>(null);
+  const total = useRef(0);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const handleMove = (event: PointerEvent) => {
+      if (previous.current) {
+        const dx = event.clientX - previous.current.x;
+        const dy = event.clientY - previous.current.y;
+        total.current += Math.hypot(dx, dy);
+        setPixels(Math.round(total.current));
+      }
+      previous.current = { x: event.clientX, y: event.clientY };
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    return () => window.removeEventListener("pointermove", handleMove);
+  }, [active, setPixels]);
+
+  return (
+    <Card className="tool-card">
+      <div className="card-head">
+        <div>
+          <span className="label">DPI CALIBRATION</span>
+          <h3>Manual movement estimate</h3>
+        </div>
+        <Crosshair size={16}/>
+      </div>
+
+      <p className="tool-desc">
+        Enter the physical distance, start tracking, and move your mouse.
+        This calculates an estimate, not a hardware DPI reading.
+      </p>
+
+      <div className="form-row">
+        <label>
+          Distance
+          <input
+            type="number"
+            min="1"
+            value={distance}
+            disabled={active}
+            onChange={e => setDistance(Math.max(1, +e.target.value || 1))}
+          />
+          <em>mm</em>
+        </label>
+
+        <label>
+          Pointer travel
+          <input type="number" value={pixels} readOnly />
+          <em>px</em>
+        </label>
+      </div>
+
+      <div className="report-buttons">
+        <button
+          className={active ? "button danger" : "button primary"}
+          onClick={() => {
+            if (active) {
+              setActive(false);
+            } else {
+              total.current = 0;
+              previous.current = null;
+              setPixels(0);
+              setActive(true);
+            }
+          }}
+        >
+          {active ? "Stop calibration" : "Start calibration"}
+        </button>
+      </div>
+
+      <div className="estimate">
+        <span>ESTIMATED EFFECTIVE DPI</span>
+        <b>{dpiEstimate ? Math.round(dpiEstimate).toLocaleString() : "—"}</b>
+        <small>
+          OS scaling and pointer acceleration affect this estimate.
+        </small>
+      </div>
+    </Card>
+  );
+}
 function DpiInput({dpi,setDpi}:{dpi:number;setDpi:(v:number)=>void}){return <Card className="tool-card"><div className="card-head"><div><span className="label">LOCAL PROFILE VALUE</span><h3>DPI value</h3></div><SlidersHorizontal size={16}/></div><p className="tool-desc">Planning value only. Applying hardware DPI is unavailable until a supported device protocol is verified.</p><DpiField dpi={dpi} setDpi={setDpi}/></Card>}
 function DpiField({dpi,setDpi}:{dpi:number;setDpi:(v:number)=>void}){return <><div className="dpi-number"><input aria-label="Configured DPI" type="number" min="100" max="20000" step="100" value={dpi} onChange={e=>setDpi(Math.max(100,Math.min(20000,+e.target.value||100)))}/><span>DPI</span></div><input className="range" aria-label="DPI range" type="range" min="100" max="20000" step="100" value={dpi} onChange={e=>setDpi(+e.target.value)}/><div className="range-labels"><span>100</span><span>20,000</span></div><div className="metric-foot"><span className="dot purple"/> Saved to profile only · no device write</div></>}
 function Devices({devices,loading,selectedId,onSelect,onRefresh}:{devices:Device[];loading:boolean;selectedId:string;onSelect:(id:string)=>void;onRefresh:()=>void}){const selected=devices.find(d=>d.id===selectedId);return <PageGrid><Card><div className="card-head"><div><span className="label">CONNECTED MICE</span><h3>{devices.length} discovered</h3></div><button className="button secondary" onClick={onRefresh}><RefreshCw size={14}/> Refresh</button></div>{loading?<p className="tool-desc">Scanning Windows Raw Input and HID interfaces…</p>:devices.length?devices.map((d,i)=><button className={`data-row device-row ${d.id===selectedId?"selected-row":""}`} key={`${d.id}-${i}`} aria-pressed={d.id===selectedId} onClick={()=>onSelect(d.id)}><div className="quick-icon bluebg"><Mouse size={17}/></div><div className="row-grow"><b>{d.name}</b><small>{d.manufacturer??"Manufacturer unavailable"} · {d.connection} · {d.status}</small></div><span className="id-pair">VID {d.vid??"—"} · PID {d.pid??"—"}</span></button>):<Empty icon={<Mouse size={20}/>} title="No connected HID mouse reported" detail="Windows Raw Input found no present mouse collections. Connect a mouse and scan again."/>}</Card><Card><div className="label">SELECTED DEVICE DETAILS</div>{selected?<div className="spec-list"><DataRow name="Manufacturer" value={selected.manufacturer??"Not available"}/><DataRow name="Vendor / product ID" value={`${selected.vid??"—"} / ${selected.pid??"—"}`}/><DataRow name="HID version" value={selected.version??"Not available"}/><DataRow name="Connection" value={selected.connection}/><DataRow name="Connection status" value={selected.status}/><DataRow name="Source" value="Raw Input + SetupAPI/HID"/><div className="hardware-ids"><b>Hardware IDs</b>{selected.hardwareIds.length?selected.hardwareIds.map(id=><code key={id}>{id}</code>):<span>Not available</span>}</div><div className="hardware-ids"><b>HID interface path</b><code>{selected.interfacePath}</code></div></div>:<div className="spec-list"><DataRow name="Model / firmware" value="Not available"/><DataRow name="Actual DPI / battery" value="Not available"/><DataRow name="Protocol" value="No device selected"/></div>}</Card></PageGrid>}
 function DataRow({name,value}:{name:string;value:string}){return <div className="data-pair"><span>{name}</span><b>{value}</b></div>}
-function DpiControl({dpi,setDpi,dpiEstimate,distance,setDistance,pixels,setPixels,selected}:{dpi:number;setDpi:(v:number)=>void;dpiEstimate:number;distance:number;setDistance:(v:number)=>void;pixels:number;setPixels:(v:number)=>void;selected?:Device}){return <PageGrid><Calibration dpiEstimate={dpiEstimate} distance={distance} setDistance={setDistance} pixels={pixels} setPixels={setPixels}/><Card className="tool-card"><div className="label">PROFILE DPI VALUE</div><h3 className="section-title">Configure a local value</h3><DpiField dpi={dpi} setDpi={setDpi}/><div className="safe-note"><ShieldCheck size={14}/> {selected?"No verified write protocol is available for this device.":"No device is selected; this value cannot be applied to hardware."}</div></Card><Card className="wide"><span className="label">HARDWARE REPORT</span><h3 className="section-title">Actual DPI</h3><div className="actual-reading">Not available</div><p className="tool-desc">No verified DPI report has been received from the device. The local profile value above is not a hardware reading.</p></Card></PageGrid>}
+
+function DpiControl({dpi,setDpi,dpiEstimate,distance,setDistance,pixels,setPixels,selected,hidReport,onReadHidReport}:{dpi:number;setDpi:(v:number)=>void;dpiEstimate:number;distance:number;setDistance:(v:number)=>void;pixels:number;setPixels:(v:number)=>void;selected?:Device;hidReport:number[] | null;onReadHidReport:()=>void}){
+return <PageGrid>
+<Calibration dpiEstimate={dpiEstimate} distance={distance} setDistance={setDistance} pixels={pixels} setPixels={setPixels}/>
+<Card className="tool-card">
+<div className="label">PROFILE DPI VALUE</div>
+<h3 className="section-title">Configure a local value</h3>
+<DpiField dpi={dpi} setDpi={setDpi}/>
+<div className="safe-note"><ShieldCheck size={14}/> {selected?"No verified write protocol is available for this device.":"No device is selected; this value cannot be applied to hardware."}</div>
+</Card>
+<Card className="wide">
+<span className="label">HARDWARE REPORT</span>
+<h3 className="section-title">HS6209 HID Report</h3>
+<button className="button primary" onClick={onReadHidReport}>Read hardware report</button>
+{hidReport ? <div className="actual-reading">{hidReport.map(byte=>byte.toString(16).padStart(2,"0")).join(" ").toUpperCase()}</div> : <div className="actual-reading">Not available</div>}
+<p className="tool-desc">Raw HID report bytes only. These bytes are not a verified DPI value.</p>
+</Card>
+</PageGrid>
+}
+
 function Polling({active,setActive,timestamps,intervals,rate,chartData}:{active:boolean;setActive:(v:boolean)=>void;timestamps:number[];intervals:number[];rate:number;chartData:{i:number;rate:number}[]}){const sorted=[...intervals].sort((a,b)=>a-b);const avgInterval=intervals.length?intervals.reduce((a,b)=>a+b,0)/intervals.length:0;const consistency=intervals.length>1&&avgInterval?Math.max(0,100-((Math.sqrt(intervals.reduce((a,b)=>a+(b-avgInterval)**2,0)/intervals.length)/avgInterval)*100)):0;return <PageGrid><Card className="wide"><div className="card-head"><div><span className="label">POINTER EVENT SAMPLE</span><h3>Move your mouse across this window while sampling</h3></div><button className={active?"button danger":"button primary"} onClick={()=>{if(!active){setActive(true);}else{setActive(false);}}}>{active?"Stop sample":"Start sample"}</button></div><div className="sample-warning"><Radio size={15}/> Timestamped pointermove events delivered to this app. Results are not USB/HID polling-rate measurements.</div><div className="chart-wrap tall">{chartData.length?<RateChart data={chartData}/>:<Empty icon={<Radio size={20}/>} title="Waiting for pointer movement" detail={active?"Move the mouse to create real event samples.":"Start the sample, then move the mouse."}/>}</div><div className="stats-strip"><DataRow name="Observed event rate" value={rate?`${rate} events/s`:"—"}/><DataRow name="Mean interval" value={avgInterval?`${avgInterval.toFixed(2)} ms`:"—"}/><DataRow name="Fastest interval" value={sorted.length?`${sorted[0].toFixed(2)} ms`:"—"}/><DataRow name="Consistency" value={intervals.length>1?`${consistency.toFixed(0)}% (1 − CV)`:"—"}/><DataRow name="Samples" value={String(timestamps.length)}/></div></Card></PageGrid>}
 function Sensor({active,setActive,motion,setMotion}:{active:boolean;setActive:(v:boolean)=>void;motion:{count:number;x:number;y:number};setMotion:(v:{count:number;x:number;y:number})=>void}){return <PageGrid><Card className="wide"><div className="card-head"><div><span className="label">POINTER MOVEMENT OBSERVATION</span><h3>Move inside the tracking area</h3></div><button className={active?"button danger":"button primary"} onClick={()=>{if(active)setActive(false);else{setMotion({count:0,x:0,y:0});setActive(true)}}}>{active?"Stop tracking":"Start tracking"}</button></div><div className="tracking-area" onPointerMove={e=>{if(active){const target=e.currentTarget;target.style.setProperty("--pointer-x",`${e.clientX-target.getBoundingClientRect().left}px`);target.style.setProperty("--pointer-y",`${e.clientY-target.getBoundingClientRect().top}px`)}}}><MousePointer2/><span>{active?"Move the mouse here":"Tracking is stopped"}</span></div><div className="stats-strip"><DataRow name="Observed move events" value={String(motion.count)}/><DataRow name="Accumulated X travel" value={`${motion.x.toFixed(0)} CSS px`}/><DataRow name="Accumulated Y travel" value={`${motion.y.toFixed(0)} CSS px`}/></div><div className="sample-warning"><AudioWaveform size={15}/> Browser pointer observations only. Sensor jitter, lift-off, acceleration and surface-level accuracy cannot be measured by this test.</div></Card></PageGrid>}
 function ButtonTester({events,onPointerDown}:{events:ButtonRecord[];onPointerDown:(e:ReactPointerEvent<HTMLDivElement>)=>void}){const counts=events.reduce<Record<number,number>>((acc,e)=>({...acc,[e.button]:(acc[e.button]??0)+1}),{});return <PageGrid><Card className="wide"><div className="card-head"><div><span className="label">BUTTON INPUT TEST</span><h3>Press mouse buttons over the test surface</h3></div><span className="chart-tag">{events.length} EVENTS</span></div><div className="button-test-surface" onPointerDown={onPointerDown}><div className="mouse-diagram"><div className="mouse-lobes"><div className={`lobe ${events[0]?.button===0?"pressed":""}`}>LEFT<br/>{counts[0]??0}</div><div className="mouse-wheel">{counts[1]??0}<br/>MID</div><div className={`lobe ${events[0]?.button===2?"pressed":""}`}>RIGHT<br/>{counts[2]??0}</div></div><div className="side-count">SIDE BUTTONS · {(counts[3]??0)+(counts[4]??0)}</div><Mouse size={33}/></div><span>Click inside this area with the physical mouse.</span></div><div className="event-list">{events.slice(0,10).map((event,i)=><div className="data-row" key={`${event.time}-${i}`}><span className="event-badge">{buttonNames[event.button]??`Button ${event.button}`}</span><small>{event.time.toFixed(1)} ms event timestamp</small></div>)}{!events.length&&<p className="tool-desc">No button events captured yet. Events outside the test surface are not counted.</p>}</div><div className="sample-warning"><Gamepad2 size={15}/> The browser receives only standard pointer buttons; vendor DPI buttons and programmable HID buttons may not be exposed.</div></Card></PageGrid>}
 function DoubleClickTester({active,events,onToggle,onPointerDown}:{active:boolean;events:ButtonRecord[];onToggle:()=>void;onPointerDown:(e:ReactPointerEvent<HTMLDivElement>)=>void}){const clicks=events.filter(e=>e.button===0).map(e=>e.time).reverse();const intervals=clicks.slice(1).map((time,i)=>time-clicks[i]).filter(n=>n>=0);const average=intervals.length?intervals.reduce((a,b)=>a+b,0)/intervals.length:0;const fastest=intervals.length?Math.min(...intervals):0;const doubleClicks=intervals.filter(n=>n<=500).length;const cps=clicks.length>1?(clicks.length-1)/((clicks[clicks.length-1]-clicks[0])/1000):0;return <PageGrid><Card className="wide"><div className="card-head"><div><span className="label">LEFT CLICK TIMING</span><h3>Click inside the test area</h3></div><button className={active?"button danger":"button primary"} onClick={onToggle}>{active?"Stop test":"Start test"}</button></div><div className="button-test-surface" onPointerDown={onPointerDown}><MousePointerClick size={34}/><b>{active?"Click the area repeatedly":"Test stopped"}</b><span>Only left-button events observed while testing are counted.</span></div><div className="stats-strip"><DataRow name="Total left clicks" value={String(clicks.length)}/><DataRow name="Click rate" value={cps?`${cps.toFixed(2)} clicks/s`:"—"}/><DataRow name="Average interval" value={average?`${average.toFixed(1)} ms`:"—"}/><DataRow name="Fastest interval" value={fastest?`${fastest.toFixed(1)} ms`:"—"}/><DataRow name="Intervals ≤500 ms" value={String(doubleClicks)}/></div><div className="sample-warning"><MousePointerClick size={15}/> These are WebView pointer timestamps. OS event coalescing and the test surface affect timing; no switch electrical debounce is measured.</div></Card></PageGrid>}
 function ScrollTester({events,onWheel}:{events:ScrollRecord[];onWheel:(e:ReactWheelEvent<HTMLDivElement>)=>void}){return <PageGrid><Card className="wide"><div className="card-head"><div><span className="label">SCROLL WHEEL INPUT</span><h3>Scroll over the test surface</h3></div><span className="chart-tag">{events.length} EVENTS</span></div><div className="scroll-surface" onWheel={onWheel}><SlidersHorizontal size={24}/><b>Scroll here</b><span>Real wheel events received by the app will appear below.</span></div><div className="stats-strip"><DataRow name="Scroll up" value={String(events.filter(e=>e.direction==="up").length)}/><DataRow name="Scroll down" value={String(events.filter(e=>e.direction==="down").length)}/><DataRow name="Wheel events" value={String(events.length)}/></div><div className="event-list">{events.slice(0,12).map((e,i)=><div className="data-row" key={`${e.time}-${i}`}><span className="event-badge">Scroll {e.direction}</span><small>{e.delta.toFixed(0)} delta · {e.time.toFixed(1)} ms</small></div>)}</div><div className="sample-warning">Wheel delta units vary by device and operating system; this view does not claim sensor-level consistency.</div></Card></PageGrid>}
 function Performance({selected,intervals,rate,motion,buttonCount,scrollCount}:{selected?:Device;intervals:number[];rate:number;motion:{count:number;x:number;y:number};buttonCount:number;scrollCount:number}){return <PageGrid><Card className="wide"><div className="label">SESSION SUMMARY</div><h3 className="section-title">Observed data only</h3><div className="spec-list"><DataRow name="Selected device" value={selected?.name??"Not available"}/><DataRow name="Pointer event rate" value={rate?`${rate} events/s · WebView sample`:"Not sampled"}/><DataRow name="Pointer intervals" value={`${intervals.length} captured`}/><DataRow name="Sensor lab movement events" value={`${motion.count} captured`}/><DataRow name="Button events" value={`${buttonCount} captured`}/><DataRow name="Scroll events" value={`${scrollCount} captured`}/><DataRow name="Hardware-level sensor metrics" value="Not available"/></div><div className="sample-warning"><Gauge size={15}/> Tests must be run from their pages before their results appear here. No sample data is generated automatically.</div></Card></PageGrid>}
-function Assistant({selected,dpiEstimate,rate}:{selected?:Device;dpiEstimate:number;rate:number}){return <PageGrid><Card className="wide"><div className="assistant-heading"><div className="quick-icon purplebg"><Sparkles size={19}/></div><div><span className="label">AI ASSISTANT</span><h3>Not connected in this build</h3></div></div><p className="tool-desc">No AI request is sent and no advice is generated. Connect a secure backend before enabling an assistant.</p><div className="spec-list"><DataRow name="Device context" value={selected?.name??"No connected device data"}/><DataRow name="Manual DPI estimate" value={dpiEstimate?`${Math.round(dpiEstimate)} DPI · user-entered movement`:"No estimate"}/><DataRow name="Pointer event sample" value={rate?`${rate} events/s · application events`:"No sample"}/></div><div className="sample-warning"><ShieldCheck size={15}/> Any future AI recommendations should keep hardware readings, estimates, and user settings distinct.</div></Card></PageGrid>}
+
+function Assistant({selected,dpiEstimate,rate,desktop}:{selected?:Device;dpiEstimate:number;rate:number;desktop:boolean}) {
+  const [apiKey,setApiKey]=useState("");
+  const [configured,setConfigured]=useState(false);
+  const [message,setMessage]=useState("");
+  const [messages,setMessages]=useState<{role:string;text:string}[]>([]);
+  const [busy,setBusy]=useState(false);
+  const [status,setStatus]=useState("");
+
+  async function checkKey(){
+    try {
+      setConfigured(await invoke<boolean>("has_openai_api_key"));
+    } catch(e) {
+      setStatus(String(e));
+    }
+  }
+
+  useEffect(()=>{
+    if(desktop) void checkKey();
+  },[desktop]);
+
+  async function saveKey(){
+    if(!apiKey.trim()) return;
+    try {
+      await invoke("save_openai_api_key",{apiKey:apiKey.trim()});
+      setApiKey("");
+      setConfigured(true);
+      setStatus("API key saved securely on this PC.");
+    } catch(e) {
+      setStatus(String(e));
+    }
+  }
+
+  async function removeKey(){
+    try {
+      await invoke("delete_openai_api_key");
+      setConfigured(false);
+      setMessages([]);
+      setStatus("Saved API key removed.");
+    } catch(e) {
+      setStatus(String(e));
+    }
+  }
+
+  async function sendMessage(){
+    const question=message.trim();
+    if(!question || busy) return;
+
+    const history=[...messages,{role:"user",text:question}];
+    setMessages(history);
+    setMessage("");
+    setBusy(true);
+    setStatus("");
+
+    const context=[
+      `Selected device: ${selected?.name??"Unavailable"}`,
+      `Manufacturer: ${selected?.manufacturer??"Unavailable"}`,
+      `Configured DPI: User setting ${"not a verified hardware reading"}`,
+      `Manual DPI estimate: ${dpiEstimate?Math.round(dpiEstimate):"Unavailable"}`,
+      `Observed pointer events: ${rate||"Not sampled"} events per second`
+    ].join("\n");
+
+    try {
+      const prompt=`Mouse AI Studio device context:\n${context}\n\nConversation:\n${history.map(m=>`${m.role}: ${m.text}`).join("\n")}\n\nRespond to the latest user message.`;
+      const answer=await invoke<string>("ask_openai",{message:prompt});
+      setMessages(v=>[...v,{role:"assistant",text:answer}]);
+    } catch(e) {
+      setStatus(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <PageGrid>
+    <Card className="wide">
+      <div className="assistant-heading">
+        <div className="quick-icon purplebg"><Sparkles size={19}/></div>
+        <div>
+          <span className="label">AI ASSISTANT</span>
+          <h3>Mouse AI Intelligence</h3>
+        </div>
+      </div>
+
+      {!desktop && <p className="tool-desc">Open the Windows desktop application to use secure API-key storage.</p>}
+
+      {desktop && <>
+        <div className="spec-list">
+          <DataRow name="OpenAI connection" value={configured?"API key configured":"API key not configured"}/>
+          <DataRow name="Device context" value={selected?.name??"No connected device data"}/>
+        </div>
+
+        {!configured ? <>
+          <label className="field-label">OpenAI API key
+            <input type="password" value={apiKey}
+              placeholder="Paste your API key here"
+              autoComplete="off"
+              onChange={e=>setApiKey(e.target.value)}/>
+          </label>
+          <button className="button primary margin-top" onClick={()=>void saveKey()} disabled={!apiKey.trim()}>
+            Save API key securely
+          </button>
+        </> : <>
+          <button className="button secondary margin-top" onClick={()=>void removeKey()}>
+            Remove API key
+          </button>
+
+          <div className="event-list">
+            {messages.map((m,i)=><div className="data-row" key={i}>
+              <b>{m.role==="user"?"You":"Mouse AI"}</b>
+              <span>{m.text}</span>
+            </div>)}
+          </div>
+
+          <label className="field-label">Ask Mouse AI
+            <textarea rows={3} value={message}
+              placeholder="Ask about your mouse, DPI, performance or troubleshooting..."
+              onChange={e=>setMessage(e.target.value)}/>
+          </label>
+          <button className="button primary margin-top"
+            onClick={()=>void sendMessage()}
+            disabled={busy||!message.trim()}>
+            {busy?"Thinking...":"Send message"}
+          </button>
+        </>}
+      </>}
+
+      {status&&<p className="tool-desc">{status}</p>}
+      <div className="sample-warning">
+        <ShieldCheck size={15}/> Your API key is stored using Windows Credential Manager. Device estimates are not verified hardware readings.
+      </div>
+    </Card>
+  </PageGrid>;
+}
+
 function Profiles({dpi,setDpi,profileName,setProfileName,profiles,onSave,desktop}:{dpi:number;setDpi:(v:number)=>void;profileName:string;setProfileName:(v:string)=>void;profiles:Profile[];onSave:()=>void;desktop:boolean}){return <PageGrid><Card><span className="label">LOCAL PROFILES</span><h3 className="section-title">Create or load a DPI value</h3><label className="field-label">Profile name<input value={profileName} maxLength={40} onChange={e=>setProfileName(e.target.value)}/></label><DpiField dpi={dpi} setDpi={setDpi}/><button className="button primary margin-top" onClick={onSave} disabled={!profileName.trim()}>Save profile {desktop?"to SQLite":"locally"}</button><p className="tool-desc">{desktop?"Profiles persist in the app’s SQLite database.":"Profiles are saved in this browser’s localStorage."} DPI remains a user setting; this does not write to mouse hardware.</p></Card><Card><span className="label">SAVED ON THIS DEVICE</span><div className="spec-list">{profiles.map(p=><button className="profile-row" key={p.name} onClick={()=>{setDpi(p.dpi);setProfileName(p.name)}}><span><b>{p.name}</b><small>{new Date(typeof p.savedAt==="number"?p.savedAt*1000:p.savedAt).toLocaleString()}</small></span><strong>{p.dpi.toLocaleString()} DPI</strong></button>)}{!profiles.length&&<Empty icon={<ClipboardList size={20}/>} title="No saved profiles" detail="Save the current local DPI value to add a profile."/>}</div></Card></PageGrid>}
 function Reports({onExport,device}:{onExport:(format:"json"|"csv")=>void;device:string}){return <PageGrid><Card className="wide"><span className="label">SESSION REPORTS</span><h3 className="section-title">Export available data</h3><p className="tool-desc">Reports contain captured session samples and device fields available to this build. Missing hardware data stays marked unavailable.</p><div className="report-device"><Mouse size={20}/><span>Device data source</span><b>{device}</b></div><div className="report-buttons"><button className="button secondary" onClick={()=>onExport("json")}><Download size={15}/> Export JSON</button><button className="button secondary" onClick={()=>onExport("csv")}><Download size={15}/> Export CSV</button></div></Card></PageGrid>}
 function SettingsPage({desktop}:{desktop:boolean}){return <PageGrid><Card><span className="label">APPLICATION STATUS</span><h3 className="section-title">Runtime</h3><div className="spec-list"><DataRow name="Mode" value={desktop?"Tauri desktop":"Browser preview"}/><DataRow name="Hardware discovery" value={desktop?"Windows Raw Input + SetupAPI/HID":"Not available in browser"}/><DataRow name="Tray and close behavior" value={desktop?"Tray menu; close hides to tray":"Not available in browser"}/><DataRow name="Start with Windows" value="Not implemented"/><DataRow name="Floating overlay" value="Not implemented"/></div></Card><Card><span className="label">READING SOURCES</span><h3 className="section-title">What each value means</h3><div className="spec-list"><DataRow name="Hardware reading" value="Returned by verified device interface"/><DataRow name="Observed event" value="Input event delivered to this app"/><DataRow name="Estimate" value="Calculated from user-entered measurements"/><DataRow name="Profile value" value="User-configured local setting"/></div></Card></PageGrid>}

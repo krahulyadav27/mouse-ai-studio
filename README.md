@@ -1,74 +1,279 @@
 # Mouse AI Studio
 
-Mouse AI Studio is the existing React + TypeScript dashboard, prepared to run inside a Tauri 2 Windows desktop shell. Hardware fields are only shown when Windows reports them; unavailable fields stay unavailable. The Windows discovery implementation uses Raw Input to enumerate present mouse collections and SetupAPI/HID to collect matching interface metadata. It opens HID collections read-only for descriptor strings and does not send output or feature reports.
+**A Windows desktop application for mouse diagnostics, performance monitoring, input testing, and AI-assisted troubleshooting.**
 
-## Implemented in the project
+Mouse AI Studio is built using React, TypeScript, Tauri 2, and Rust. It provides a desktop dashboard for discovering connected mouse devices, observing pointer activity, performing manual DPI calibration, testing mouse inputs, managing profiles, and generating diagnostic reports.
 
-- Existing React/Vite interface is retained, including dashboard navigation, mouse discovery view, DPI calibration, polling observation, movement observation, button, double-click and scroll tests, profiles, reports and settings.
-- Tauri 2 application configuration with Mouse AI Studio name, version `0.1.0`, Windows window dimensions, application icons, NSIS/MSI bundle targets and tray menu source.
-- Rust Windows device enumeration source using Raw Input, SetupAPI and HID descriptors, including manufacturer/product strings when exposed, VID/PID and hardware IDs when present, connection hints, device paths and a two-second reconnection scan.
-- Tray menu source for showing the window and quitting. Closing the main window hides it to the tray.
-- SQLite schema and Tauri commands for local settings and named DPI-value profiles.
-- Browser-facing input tests use actual events delivered to the WebView and explain their measurement limits. The browser preview does not claim to detect hardware.
-- A generated Mouse AI Studio icon is included in `src-tauri/icons/` and referenced by the Tauri bundle configuration.
+The application also includes an OpenAI-powered assistant integration with secure API-key storage through Windows Credential Manager.
 
-## Not implemented or not verified
+## Features
 
-- **No Windows desktop binary or installer was produced.** The Tauri build reached Rust release compilation, but Windows Application Control denied execution of generated Rust build-script executables with OS error `4551`. This prevents verifying or launching the native app in this environment. NSIS was also not found, so an NSIS setup executable cannot be packaged here. No `.exe` or `.msi` installer exists yet.
-- The Rust backend, SQLite commands, tray behavior, live device discovery and installer still need a successful native Windows build and runtime verification. Frontend build success does not verify Rust compilation.
-- Start with Windows and the floating DPI overlay remain pending. Window close-to-tray and tray menu behavior are implemented in native source but are not runtime verified.
-- Raw Input device arrival/removal is observed by periodic re-enumeration; a native `WM_INPUT_DEVICE_CHANGE` event handler is not implemented. Tests currently observe WebView events; raw HID input reports are not captured.
-- Actual mouse DPI read/write, physical DPI-button event identification, hardware stages and device-specific profile application are not implemented. The Arctic Fox Clearview product page lists 1600 DPI resolution, but the mouse has not been identified among the currently connected devices and no supported DPI control protocol has been verified. The application intentionally does not write undocumented USB commands. The configured DPI is only a local profile value; manual calibration is an estimate.
-- AI service integration, battery readings and hardware sensor metrics remain pending.
+### 1. Mouse Device Discovery
+- Discover connected mouse devices on Windows.
+- Display available device information and hardware identifiers.
+- Collect manufacturer and product information when exposed by Windows.
+- Display available VID/PID and device interface metadata.
+- Refresh device discovery information.
 
-## Windows prerequisites
+### 2. DPI Calibration
+- Manually calibrate mouse movement.
+- Calculate estimated DPI using physical movement distance and observed pointer travel.
+- Display user-configured DPI values.
+- Distinguish manual estimates from verified hardware readings.
 
-- Windows 10 or 11.
-- Node.js and Corepack/pnpm. This environment has Node `v24.22.1` and pnpm `11.25.0`; `npm` is not on PATH.
-- Rust stable with the MSVC target, Visual Studio C++ Build Tools and Windows SDK.
-- To package setup installers, install NSIS for `-b nsis` and the WiX Toolset for `-b msi` as required by Tauri's Windows bundler.
-- The machine's application-control policy must allow Cargo/Rust build scripts and proc-macro executables to run.
+**Note:** DPI calibration is an estimate. The application does not currently change the physical DPI setting of the mouse.
 
-## Run locally
+### 3. Polling Rate Monitoring
+- Observe pointer event delivery timing.
+- Display application-level event-rate measurements.
+- Monitor pointer activity during testing.
 
-From this directory in PowerShell:
+**Note:** These measurements represent events delivered to the application, not the actual USB polling frequency of the mouse.
 
-```powershell
-corepack pnpm install
-corepack pnpm tauri:dev
+### 4. Sensor and Movement Testing
+- Observe pointer movement along the X and Y axes.
+- Monitor movement activity.
+- Visualize application-level movement information.
+
+### 5. Mouse Input Testing
+- Button testing.
+- Double-click testing.
+- Scroll testing.
+- Observe mouse events delivered to the application.
+
+### 6. Profiles and Reports
+- Create and manage named mouse profiles.
+- Store local settings and profile information using SQLite.
+- Export diagnostic information in JSON and CSV formats.
+
+### 7. AI Assistant
+- OpenAI API integration using the Responses API.
+- Ask questions about mouse hardware, DPI, performance, and troubleshooting.
+- Include available mouse-device context in AI requests.
+- Maintain conversation history during the current assistant session.
+- Store API credentials using Windows Credential Manager.
+- Remove saved API credentials from the application.
+
+**Important:** An OpenAI API key and available API credits are required to generate AI responses. ChatGPT subscriptions and API billing are separate. Live response testing is pending sufficient API credits.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| React | User interface |
+| TypeScript | Frontend development |
+| Vite | Development server and build tooling |
+| Tauri 2 | Windows desktop application framework |
+| Rust | Native backend |
+| SQLite | Local database |
+| Windows Raw Input | Mouse device discovery |
+| SetupAPI and HID | Hardware metadata |
+| OpenAI API | AI assistant |
+| Windows Credential Manager | Secure API-key storage |
+
+## Application Architecture
+
+```text
+Mouse AI Studio
+│
+├── Frontend
+│   ├── React
+│   ├── TypeScript
+│   └── Vite
+│
+├── Desktop Framework
+│   └── Tauri 2
+│
+├── Native Backend
+│   └── Rust
+│       ├── Windows Raw Input
+│       ├── SetupAPI / HID
+│       ├── SQLite commands
+│       ├── Device discovery
+│       └── OpenAI API integration
+│
+└── Local Storage
+    ├── SQLite database
+    └── Windows Credential Manager
 ```
 
-The Vite/Tauri development URL is `http://127.0.0.1:1420/`. Tauri starts Vite with strict port binding, so it exits clearly if that port is already occupied. For frontend-only preview:
+## Project Structure
 
-```powershell
-corepack pnpm dev
+```text
+mouse-ai-studio/
+│
+├── src/
+│   ├── App.tsx
+│   ├── main.tsx
+│   ├── style.css
+│   └── pages.css
+│
+├── src-tauri/
+│   ├── src/
+│   │   ├── lib.rs
+│   │   └── main.rs
+│   ├── capabilities/
+│   ├── icons/
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+│
+├── index.html
+├── package.json
+├── pnpm-lock.yaml
+├── vite.config.ts
+├── tsconfig.json
+├── .gitignore
+└── README.md
 ```
 
-In this managed environment, the pnpm launcher has failed while creating a symlink in its AppData package store (`EPERM`). The installed dependencies were usable with these direct Node commands:
+## Windows Prerequisites
+
+Before running the project, install:
+
+1. Windows 10 or Windows 11.
+2. Node.js.
+3. Corepack / pnpm.
+4. Rust stable.
+5. Visual Studio C++ Build Tools.
+6. Windows SDK.
+
+Tauri's Windows development environment requires the appropriate Rust MSVC toolchain and Windows development dependencies.
+
+## Run the Application Locally
+
+### Step 1: Clone the repository
 
 ```powershell
-node node_modules/typescript/bin/tsc -b
-node node_modules/vite/bin/vite.js build
-node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 1420 --strictPort
+git clone https://github.com/krahulyadav27/mouse-ai-studio.git
 ```
 
-The TypeScript check and Vite production build pass. The UI has not been verified in a live browser session here.
-
-## Build Windows installers
-
-After installing the prerequisites above and allowing Cargo build subprocesses, run:
+### Step 2: Enter the project directory
 
 ```powershell
-corepack pnpm tauri:build -- --bundles nsis,msi
+cd mouse-ai-studio
 ```
 
-Tauri writes bundles under `src-tauri/target/release/bundle/`. Expected files include a setup `.exe` in `nsis/` and an `.msi` in `msi/`, depending on installed bundler prerequisites. No installer file is currently available to provide.
+### Step 3: Install dependencies
 
-## Hardware measurement notes
+```powershell
+pnpm.cmd install
+```
 
-- Raw Input identifies mouse input collections and device paths. Windows/driver metadata may not expose a retail model name, current DPI, sensor, battery or firmware.
-- Polling-rate view measures pointer event delivery timing inside the WebView, not the USB/HID report rate.
-- Movement view accumulates observed CSS-pixel travel; it cannot measure sensor jitter, lift-off distance or surface accuracy.
-- Button, double-click and scroll views measure events delivered to the app, not switch debounce or low-level hardware timing.
-- DPI calibration uses the user's entered physical distance and pointer travel. It is an estimate and does not change hardware DPI or Windows pointer speed.
-- No sample readings are generated automatically.
+### Step 4: Run the Windows desktop application
+
+```powershell
+pnpm.cmd tauri dev
+```
+
+This starts the Vite development server and launches Mouse AI Studio as a native Windows desktop application.
+
+### Step 5: Check the frontend
+
+```powershell
+pnpm.cmd check
+```
+
+### Step 6: Check the Rust backend
+
+```powershell
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+## Run Frontend Only
+
+To run the frontend without launching the Tauri desktop shell:
+
+```powershell
+pnpm.cmd dev
+```
+
+Open the local Vite address displayed in the terminal.
+
+**Note:** Browser preview does not provide the full native Windows hardware-discovery functionality.
+
+## Configure the AI Assistant
+
+Mouse AI Studio supports an OpenAI-powered assistant.
+
+1. Create an API key at https://platform.openai.com/api-keys.
+2. Launch Mouse AI Studio.
+3. Navigate to **AI Assistant**.
+4. Enter your API key.
+5. Select **Save API key securely**.
+6. Start asking questions.
+
+### API Security
+
+- API keys are stored using Windows Credential Manager.
+- API keys are not intended to be stored in frontend source code.
+- Never commit API keys to GitHub.
+- API usage requires separate OpenAI API billing and available credits.
+
+## Build Windows Application
+
+To create a production desktop build:
+
+```powershell
+pnpm.cmd tauri build
+```
+
+Tauri generates production build artifacts under:
+
+```text
+src-tauri/target/release/
+```
+
+Installer availability depends on the installed Windows bundling prerequisites and successful packaging.
+
+**Current release status:** The application has been launched successfully in Tauri development mode. A distributable Windows installer has not yet been verified.
+
+## Hardware Measurement Limitations
+
+Mouse AI Studio is designed to distinguish actual hardware information from estimates and application-level observations.
+
+- Device discovery uses Windows Raw Input, SetupAPI, and HID metadata.
+- Hardware information depends on what Windows and the device driver expose.
+- Polling-rate measurements represent application-level pointer event delivery.
+- Movement measurements represent observed pointer travel in the application.
+- Button and scroll tests observe events delivered to the WebView.
+- DPI calibration is a manual estimate.
+- Actual hardware DPI read/write and device-specific control protocols are not currently implemented.
+- Battery readings and advanced sensor metrics are not currently available.
+- The floating DPI overlay and Windows startup integration remain future improvements.
+
+The application does not send undocumented USB commands or invent unavailable hardware readings.
+
+## Security and Privacy
+
+- API credentials are stored using Windows Credential Manager.
+- Local profiles and settings are stored on the user's PC.
+- Hardware discovery is designed to be read-only.
+- No undocumented device-control commands are sent.
+
+## Future Improvements
+
+- Floating DPI monitoring overlay.
+- Windows startup integration.
+- More advanced hardware diagnostics.
+- Additional mouse-device compatibility.
+- Expanded performance analytics.
+- Improved AI troubleshooting and recommendations.
+- Production Windows installer and release packaging.
+
+## Project Status
+
+**Version:** 0.1.0  
+**Platform:** Windows  
+**Application Type:** Desktop Application
+
+The application has passed frontend and Rust development checks and has successfully launched in Windows Tauri development mode. Some hardware features and production packaging remain under development.
+
+## Author
+
+**Mouse AI Studio**  
+Developed as a desktop software engineering project using React, TypeScript, Rust, and Tauri.
+
+## Repository
+
+https://github.com/krahulyadav27/mouse-ai-studio
+
